@@ -39,12 +39,51 @@ import Data.Tree
 import Data.Functor.Coproduct
 #endif
 
+-- $setup
+-- >>> import Data.List.NonEmpty ((<|))
+-- >>> import Test.QuickCheck
+-- >>> import Control.Applicative (liftA2)
+-- >>> instance Arbitrary a => Arbitrary (NonEmpty a) where arbitrary = liftA2 (:|) arbitrary arbitrary
+
 class Foldable t => Foldable1 t where
   fold1 :: Semigroup m => t m -> m
   foldMap1 :: Semigroup m => (a -> m) -> t a -> m
+  foldLeft1 :: (b -> a -> b) -> (a -> b) -> t a -> b
+  foldRight1 :: (a -> b -> b) -> (a -> b) -> t a -> b
 
   foldMap1 f = maybe (error "foldMap1") id . getOption . foldMap (Option . Just . f)
   fold1 = foldMap1 id
+
+  -- | A 'foldl1' without an error case, where the first step is given
+  -- to 'z'.
+  --
+  -- >>> foldLeft1 (flip (<|)) (:|[]) $ 'm' :| "onty"
+  -- 'y' :| "tnom"
+  --
+  -- prop> foldLeft1 (flip (:)) (:[]) xs == reverse (foldRight1 (:) (:[]) (xs :: NonEmpty Int))
+  foldLeft1 f z t =
+    let f' = flip f
+        LeftFold1 b _ e = foldMap1 (\a -> LeftFold1 (z a) (f' a) id) t
+    in e b
+
+  -- | A 'foldr1' without an error case, where the first step is given
+  -- to 'z'.
+  --
+  -- >>> foldRight1 (\s -> (reverse s:)) (:[]) $ "hello" :| ["there", "reader"]
+  -- ["olleh","ereht","reader"]
+  foldRight1 f z t =
+    let RightFold1 e _ b = foldMap1 (\a -> RightFold1 id (f a) (z a)) t
+    in e b
+
+data LeftFold1 a = LeftFold1 a (a -> a) (a -> a)
+
+instance Semigroup (LeftFold1 a) where
+  LeftFold1 zl el l <> LeftFold1 _ er r = LeftFold1 zl el (r . er . l)
+
+data RightFold1 a = RightFold1 (a -> a) (a -> a) a
+
+instance Semigroup (RightFold1 a) where
+  RightFold1 l el _ <> RightFold1 r er zr = RightFold1 (l . el . r) er zr
 
 #ifdef MIN_VERSION_containers
 instance Foldable1 Tree where
